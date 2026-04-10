@@ -48,8 +48,7 @@ impl Stats {
 
 fn print_stats(stats: &Stats, cfg: &SearchConfig, total: u64, label: &str) {
     if cfg.start_seed > 0 {
-        eprintln!("--- {label}: {} seeds examined, up to {} ---",
-            total, cfg.start_seed + total);
+        eprintln!("--- {label}: {} ---", cfg.start_seed + total);
     } else {
         eprintln!("--- {label}: {} seeds examined ---", total);
     }
