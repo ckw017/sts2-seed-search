@@ -46,16 +46,21 @@ impl Stats {
     }
 }
 
-fn print_stats(stats: &Stats, cfg: &SearchConfig, total: u64) {
-    eprintln!("--- Progress: {} seeds examined ---", total);
+fn print_stats(stats: &Stats, cfg: &SearchConfig, total: u64, label: &str) {
+    if cfg.start_seed > 0 {
+        eprintln!("--- {label}: {} seeds examined, up to {} ---",
+            total, cfg.start_seed + total);
+    } else {
+        eprintln!("--- {label}: {} seeds examined ---", total);
+    }
     for (i, name) in CONDITION_NAMES.iter().enumerate() {
         let passed  = stats.passed[i].load(Ordering::Relaxed);
         // reached[i] = seeds that actually evaluated condition i
         //   = passed[i-1] for i>0, or total for i==0
         let reached = if i == 0 { total } else { stats.passed[i - 1].load(Ordering::Relaxed) };
         let na = match i {
-            4 => cfg.drowning_beacon_max_pos == 0,
-            6 => !cfg.hopper_second,
+            3 => cfg.drowning_beacon_max_pos == 0,
+            5 => !cfg.hopper_second,
             _ => false,
         };
         if na {
@@ -118,7 +123,7 @@ pub fn search_doll_seeds(cfg: &SearchConfig) {
                 let prev = stats.examined.fetch_add(1, Ordering::Relaxed);
                 let new_total = prev + 1;
                 if prev / 100_000_000 != new_total / 100_000_000 {
-                    print_stats(&stats, cfg, new_total);
+                    print_stats(&stats, cfg, new_total, "Progress");
                 }
 
                 if stage == STAGE_FULL {
@@ -166,6 +171,5 @@ pub fn search_doll_seeds(cfg: &SearchConfig) {
 
     // Final stats
     let total = stats.examined.load(Ordering::Relaxed);
-    eprintln!("--- Final stats: {} seeds examined ---", total);
-    print_stats(&stats, cfg, total.max(1));
+    print_stats(&stats, cfg, total.max(1), "Final");
 }

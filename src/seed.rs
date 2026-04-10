@@ -233,19 +233,20 @@ pub const NUM_CONDITIONS: usize = 11;
 pub const STAGE_FULL: u8 = NUM_CONDITIONS as u8;
 
 pub const CONDITION_NAMES: [&str; NUM_CONDITIONS] = [
-    // Combined Neow check — pre-filters 4 RNGs (~5% pass), then confirms via Neow simulation
-    "Neow gives EndOfDays",           // 0  (~5% pass: ArcaneScroll|LeafyPoultice|NewLeaf paths)
-    "Tanx: ThrowingAxe",              // 1  (~1.68% conditional pass, 9 RNG calls)
-    "Orobas: ElectricShrymp",         // 2
-    // UpFront simulation — only ~0.001% of seeds reach here
-    "DollysMirror ≤ max shops",       // 3
-    "DrowningBeacon pos OK",          // 4  (N/A when constraint disabled)
-    "DollRoom pos OK",                // 5  ← before Act2 encounters
-    "ThievingHopper 2nd weak",        // 6  (N/A when disabled)
-    "Act2 ancient = Orobas",          // 7
-    "Reflections pos OK",             // 8  ← before Act3 encounters
-    "Act3 boss = Queen",              // 9
-    "Act3 ancient = Tanx",            // 10
+    // Cheap independent checks (checked in this order before UpFront simulation)
+    "Tanx: ThrowingAxe",              // 0
+    "Orobas: ElectricShrymp",         // 1
+    "Neow gives EndOfDays",           // 2
+    // UpFront simulation (sequential RNG stream)
+    "DrowningBeacon pos OK",          // 3  (N/A when constraint disabled)
+    "DollRoom pos OK",                // 4
+    "ThievingHopper 2nd weak",        // 5  (N/A when disabled)
+    "Act2 ancient = Orobas",          // 6
+    "Reflections pos OK",             // 7
+    "Act3 boss = Queen",              // 8
+    "Act3 ancient = Tanx",            // 9
+    // Deferred expensive check
+    "DollysMirror ≤ max shops",       // 10
 ];
 
 /// Returns (stage, underdocks, dm_dist, drowning_beacon_pos, doll_pos, refl_pos, neow_path).
@@ -278,14 +279,37 @@ pub fn simulate_seed_doll(
 
     let run_seed = make_run_seed(str_seed);
 
-    // --- Condition 0: Neow gives EndOfDays (any path) ---
+    // --- Condition 0: Tanx offers ThrowingAxe ---
+    // Cheap (~10 RNG calls), ~10% pass rate — best filter-per-cost, run first.
+    // C#: (uint)(runSeed + netId + (ulong)hash) — (ulong)int sign-extends through i64
+    let tanx_seed = (run_seed as u64)
+        .wrapping_add(net_id)
+        .wrapping_add(get_deterministic_hash_code("TANX") as i64 as u64) as u32;
+    let mut tanx_rng = Rng::new(tanx_seed, 0);
+    if !tanx_has_throwing_axe(&mut tanx_rng, tanx_pool_size) {
+        return fail(0);
+    }
+
+    // --- Condition 1: Orobas offers ElectricShrymp ---
+    // Cheap (~5 RNG calls), ~25% pass rate.
+    let orobas_seed = (run_seed as u64)
+        .wrapping_add(net_id)
+        .wrapping_add(get_deterministic_hash_code("OROBAS") as i64 as u64) as u32;
+    let mut orobas_rng = Rng::new(orobas_seed, 0);
+    if !orobas_has_electric_shrymp(&mut orobas_rng, num_other_chars, orobas_pool3_count) {
+        return fail(1);
+    }
+
+    // --- Condition 2: Neow gives EndOfDays (any path) ---
+    // Expensive (4× Rng::new + simulation), ~1% pass rate.
+    // Deferred until after cheap Tanx/Orobas filters eliminate ~93% of seeds.
     // PlayerRng streams: rewards and transformations use player_seed = run_seed + net_id [u32]
     // RunStateRng stream: niche uses run_seed directly (no net_id)
     // Event RNG (neow_seed): run_seed + net_id + hash("NEOW") [u64 + sign-extension]
     let player_seed = run_seed.wrapping_add(net_id as u32);
-    let rewards_seed        = make_rng_seed(player_seed, "rewards");
+    let rewards_seed         = make_rng_seed(player_seed, "rewards");
     let transformations_seed = make_rng_seed(player_seed, "transformations");
-    let niche_seed          = make_rng_seed(run_seed, "niche");
+    let niche_seed           = make_rng_seed(run_seed, "niche");
     let neow_seed = (run_seed as u64)
         .wrapping_add(net_id)
         .wrapping_add(get_deterministic_hash_code("NEOW") as i64 as u64) as u32;
@@ -298,40 +322,11 @@ pub fn simulate_seed_doll(
         neow_curse_list_size, rare_card_count, end_of_days_rare_idx,
         transform_pool_size, end_of_days_transform_idx,
     ) else {
-        return fail(0);
+        return fail(2);
     };
 
-    // --- Condition 1: Tanx offers ThrowingAxe ---
-    // C#: (uint)(runSeed + netId + (ulong)hash) — (ulong)int sign-extends through i64
-    let tanx_seed = (run_seed as u64)
-        .wrapping_add(net_id)
-        .wrapping_add(get_deterministic_hash_code("TANX") as i64 as u64) as u32;
-    let mut tanx_rng = Rng::new(tanx_seed, 0);
-    if !tanx_has_throwing_axe(&mut tanx_rng, tanx_pool_size) {
-        return fail(1);
-    }
-
-    // --- Condition 2: Orobas offers ElectricShrymp ---
-    let orobas_seed = (run_seed as u64)
-        .wrapping_add(net_id)
-        .wrapping_add(get_deterministic_hash_code("OROBAS") as i64 as u64) as u32;
-    let mut orobas_rng = Rng::new(orobas_seed, 0);
-    if !orobas_has_electric_shrymp(&mut orobas_rng, num_other_chars, orobas_pool3_count) {
-        return fail(2);
-    }
-
-    // --- Condition 3: Dolly's Mirror back-distance ≤ max shops ---
-    // (Also rejects Overgrowth seeds when drowning beacon constraint is active)
-    let underdocks = is_underdocks_act1(str_seed, underdocks_revealed, always_underdocks);
-    if drowning_beacon_max_pos > 0 && !underdocks {
-        return fail(3);
-    }
-    let dm_dist = dolly_mirror_back_distance(run_seed);
-    if dm_dist > max_act1_shops {
-        return fail(3);
-    }
-
     // UpFront RNG — counter starts at 230 (relic-bag init consumed calls 0..229)
+    let underdocks = is_underdocks_act1(str_seed, underdocks_revealed, always_underdocks);
     let up_front_seed = make_rng_seed(run_seed, "up_front");
     let mut rng = Rng::new(up_front_seed, 230);
 
@@ -340,7 +335,7 @@ pub fn simulate_seed_doll(
     let act3_shared = rng.next_int(shared_count - act2_shared + 1);
 
     // Act1 GenerateRooms
-    // --- Condition 4: DrowningBeacon pos OK (N/A when constraint disabled) ---
+    // --- Condition 3: DrowningBeacon pos OK (N/A when constraint disabled) ---
     let mut drowning_beacon_pos = -1i32;
     if underdocks {
         let db_pos = track_shuffle(&mut rng, UDK.events, DROWNING_BEACON_UDK_IDX);
@@ -348,20 +343,23 @@ pub fn simulate_seed_doll(
         if drowning_beacon_max_pos > 0 && (db_pos == 0 || db_pos > drowning_beacon_max_pos) {
             sim_enc(&mut rng, &UDK);
             rng.next_item(i32::from(neow_epoch));
-            return fail(4);
+            return fail(3);
         }
         sim_enc(&mut rng, &UDK);
     } else {
+        if drowning_beacon_max_pos > 0 {
+            return fail(3); // beacon constraint requires Underdocks
+        }
         track_shuffle(&mut rng, OVG.events, DOLL_ROOM_OVG_IDX);
         sim_enc(&mut rng, &OVG);
     }
     rng.next_item(i32::from(neow_epoch));
 
     // Act2 GenerateRooms
-    // --- Condition 5: DollRoom pos in range (checked before running encounters) ---
+    // --- Condition 4: DollRoom pos in range (checked before running encounters) ---
     let doll_room_pos = track_shuffle(&mut rng, HIVE.events, DOLL_ROOM_HIVE_IDX);
     if doll_room_pos == 0 || doll_room_pos > doll_room_max_pos {
-        return fail(5);
+        return fail(4);
     }
 
     let (hive_weak_picks, _) = sim_enc_weak::<2>(&mut rng, &HIVE);
@@ -369,34 +367,41 @@ pub fn simulate_seed_doll(
     let act2_ancient_idx = rng.next_item(act2_ancient_base + act2_shared);
     let act2_is_orobas = orobas_epoch && act2_ancient_idx == 0;
 
-    // --- Condition 6: ThievingHopper is 2nd weak (N/A when disabled) ---
+    // --- Condition 5: ThievingHopper is 2nd weak (N/A when disabled) ---
     if hopper_second && hive_weak_picks[1] != THIEVES_HOPPER_WEAK_IDX {
+        return fail(5);
+    }
+
+    // --- Condition 6: Act2 = Orobas ---
+    if !act2_is_orobas {
         return fail(6);
     }
 
-    // --- Condition 7: Act2 = Orobas ---
-    if !act2_is_orobas {
-        return fail(7);
-    }
-
     // Act3 GenerateRooms
-    // --- Condition 8: Reflections pos in range (checked before running encounters) ---
+    // --- Condition 7: Reflections pos in range (checked before running encounters) ---
     let reflections_pos = track_shuffle(&mut rng, GLORY.events, REFLECTIONS_GLORY_IDX);
     if reflections_pos == 0 || reflections_pos > reflections_max_pos {
-        return fail(8);
+        return fail(7);
     }
 
     let act3_boss_idx = sim_enc(&mut rng, &GLORY);
 
-    // --- Condition 9: Act3 boss = Queen ---
+    // --- Condition 8: Act3 boss = Queen ---
     if act3_boss_idx != QUEEN_BOSS_IDX {
-        return fail(9);
+        return fail(8);
     }
 
     let act3_ancient_idx = rng.next_item(3 + act3_shared);
 
-    // --- Condition 10: Act3 = Tanx ---
+    // --- Condition 9: Act3 = Tanx ---
     if act3_ancient_idx != 1 {
+        return fail(9);
+    }
+
+    // --- Condition 10: Dolly's Mirror back-distance ≤ max shops ---
+    // Deferred to last: costs ~230 RNG advances; almost no seeds reach here.
+    let dm_dist = dolly_mirror_back_distance(run_seed);
+    if dm_dist > max_act1_shops {
         return fail(10);
     }
 
@@ -426,19 +431,19 @@ mod tests {
         assert_eq!(refl_pos, 2,   "3JJBXD reflections_pos should be 2");
     }
 
-    // 3JJBXD should fail with tighter constraints (dm_dist=2 > max_shops=1)
-    // Passes event checks 0-2, fails cond 3 (DollysMirror)
+    // 3JJBXD: dm_dist=2, so max_shops=1 should fail cond 3 (DollysMirror).
+    // Use doll_pos=3, refl_pos=2 so conditions 4-10 pass, hitting the deferred check.
     #[test]
     fn seed_3jjbxd_fails_tight() {
-        let (stage, ..) = check("3JJBXD", 1, 2, 1);
-        assert_eq!(stage, 3, "3JJBXD should fail cond 3 (dm_dist=2 > max_shops=1)");
+        let (stage, ..) = check("3JJBXD", 3, 2, 1);
+        assert_eq!(stage, 10, "3JJBXD should fail cond 10 (dm_dist=2 > max_shops=1)");
     }
 
-    // QDHB0L: Act2=Orobas, Act3=Vakuu → fails cond 10 (Act3=Tanx)
+    // QDHB0L: Act2=Orobas, Act3=Vakuu → fails cond 9 (Act3=Tanx)
     #[test]
     fn seed_qdhb0l_fails_tanx() {
         let (stage, ..) = check("QDHB0L", 3, 5, 3);
-        assert_eq!(stage, 10, "QDHB0L should fail at cond 10 (Act3=Vakuu, not Tanx)");
+        assert_eq!(stage, 9, "QDHB0L should fail at cond 9 (Act3=Vakuu, not Tanx)");
     }
 
     #[test]
@@ -559,10 +564,10 @@ mod tests {
         }
     }
 
-    // 2ULUAAX: fails cond 8 (Reflections pos=0, consumed by ancient room)
+    // 2ULUAAX: fails cond 7 (Reflections pos=0, consumed by ancient room)
     #[test]
     fn seed_2uluaax_fails_reflections() {
         let (stage, ..) = check("2ULUAAX", 3, 5, 3);
-        assert_eq!(stage, 8, "2ULUAAX should fail at cond 8 (Reflections pos check)");
+        assert_eq!(stage, 7, "2ULUAAX should fail at cond 7 (Reflections pos check)");
     }
 }
