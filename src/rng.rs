@@ -163,6 +163,27 @@ impl Rng {
         }
         self.inner.next_range(0, count)
     }
+
+    /// Equivalent to C# NextGaussianInt(mean, stdDev, min, max).
+    /// Uses Box-Muller; calls _random.NextDouble() directly (no Counter increment per call).
+    /// Loops until result is in [min, max].
+    /// Expose the raw internal_sample value without consuming Counter, for debugging.
+    pub fn debug_internal_sample(&mut self) -> i32 {
+        self.inner.internal_sample()
+    }
+
+    pub fn next_gaussian_int(&mut self, mean: i32, std_dev: f64, min: i32, max: i32) -> i32 {
+        loop {
+            let d = 1.0 - self.inner.next_double();
+            let n = 1.0 - self.inner.next_double();
+            let z = (-2.0 * d.ln()).sqrt() * (std::f64::consts::TAU * n).sin();
+            let a = mean as f64 + std_dev * z;
+            let result = a.round() as i32;
+            if result >= min && result <= max {
+                return result;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

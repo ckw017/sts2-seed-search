@@ -63,17 +63,18 @@ static OVG_WEAK: [Enc; 4] = [
     Enc { tags: TAG_SHRINKER },  // ShrinkerBeetleWeak
     Enc { tags: TAG_SLIMES },    // SlimesWeak
 ];
-static OVG_REG: [Enc; 11] = [
+static OVG_REG: [Enc; 12] = [
     Enc { tags: 0 },                             // CubexConstruct
     Enc { tags: TAG_MUSHROOM | TAG_SLIMES },      // Flyconid
     Enc { tags: 0 },                             // Fogmog
     Enc { tags: 0 },                             // Inklets
     Enc { tags: 0 },                             // Mawler
-    Enc { tags: 0 },                             // Nibbits
+    Enc { tags: 0 },                             // Nibbits (NibbitsNormal)
     Enc { tags: TAG_SHRINKER | TAG_CRAWLER },     // OvergrowthCrawlers
     Enc { tags: 0 },                             // RubyRaiders
-    Enc { tags: TAG_MUSHROOM },                   // SnappingJaxfruit
+    Enc { tags: TAG_SLIMES },                    // SlimesNormal
     Enc { tags: 0 },                             // SlitheringStrangler
+    Enc { tags: TAG_MUSHROOM },                   // SnappingJaxfruit
     Enc { tags: 0 },                             // VineShambler
 ];
 static OVG_ELITE: [Enc; 3] = [Enc { tags: 0 }, Enc { tags: 0 }, Enc { tags: 0 }];
@@ -151,8 +152,18 @@ pub static GLORY: ActPools = ActPools {
 };
 
 pub const REFLECTIONS_GLORY_IDX: i32 = 3; // Glory[3] in 25-event Glory list
-pub const QUEEN_BOSS_IDX:         i32 = 1; // DoormakerBoss=0, QueenBoss=1, TestSubjectBoss=2
+pub const QUEEN_BOSS_IDX:        i32 = 1; // DoormakerBoss=0, QueenBoss=1, TestSubjectBoss=2
+pub const TEST_SUBJECT_BOSS_IDX: i32 = 2;
 
 // Shop deque constants
 pub const SHOP_DEQUE_SIZE:   i32 = 26; // 25 shared shop relics + UndyingSigil
 pub const DOLLYS_MIRROR_IDX: i32 = 6;  // position in initial shop deque array
+
+// UnsettlingLamp relic grab bag constants
+// SharedRelicPool Rare (35 relics, array order): UnsettlingLamp is at index 31.
+pub const SHARED_RARE_SIZE:           i32 = 35;
+pub const UNSETTLING_LAMP_SHARED_IDX: i32 = 31;
+// PlayerRelicGrabBag Rare (38 relics): SharedRelicPool Rare (35) first, then
+// NecrobinderRelicPool Rare (BigHat, Bookmark, IvoryTile). UnsettlingLamp stays at 31.
+pub const PLAYER_RARE_SIZE:           i32 = 38;
+pub const UNSETTLING_LAMP_PLAYER_IDX: i32 = 31;

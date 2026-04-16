@@ -106,7 +106,11 @@ pub fn simulate_encounters(
         last_mask = act.weak[idx as usize].tags;
     }
 
-    // Regular encounters — inherit last weak pick as initial constraint
+    // Regular encounters — inherit last weak pick's TAG constraint only.
+    // The game predicate is `!e.SharesTagsWith(last) && e != last`; for reg encounters
+    // `e != lastWeakModel` is always true (different model class), so only tags matter.
+    // Resetting last_idx to -1 neutralises the cross-pool index exclusion.
+    last_idx = -1;
     let mut reg_bag: Vec<i32> = Vec::with_capacity(act.reg.len());
     for _ in act.num_weak..act.base_rooms {
         if reg_bag.is_empty() {
